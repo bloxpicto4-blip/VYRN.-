@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile with role-based access and privacy settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 50 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["admin", "member", "approved"] },
+        "isApproved": { "type": "boolean" },
+        "avatarUrl": { "type": "string", "maxLength": 500 },
+        "bio": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "username", "role", "isApproved", "createdAt"]
+    },
+    "ContentItem": {
+      "title": "Content Item",
+      "description": "Universal creative entity representing games, applications, projects, books, or podcasts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "slug": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "summary": { "type": "string", "maxLength": 500 },
+        "type": { "type": "string", "enum": ["game", "app", "project", "book", "podcast"] },
+        "category": { "type": "string", "maxLength": 100 },
+        "coverImage": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["published", "draft", "archived"] },
+        "audience": { "type": "string", "enum": ["public", "members", "approved"] },
+        "creator": { "type": "string", "maxLength": 100 },
+        "isFeatured": { "type": "boolean" },
+        "likesCount": { "type": "number" },
+        "viewsCount": { "type": "number" },
+        "downloadsCount": { "type": "number" },
+        "commentsEnabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "slug", "type", "category", "coverImage", "status", "audience", "createdAt"]
+    },
+    "Section": {
+      "title": "Dynamic Section",
+      "description": "Configurable content section on the platform homepage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "slug": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "accentColor": { "type": "string", "maxLength": 30 },
+        "layoutType": { "type": "string", "enum": ["carousel", "editorial", "bento", "grid", "media_showcase"] },
+        "filterType": { "type": "string", "enum": ["all", "featured", "fresh_drops", "hidden_gems", "editors_picks", "category", "custom"] },
+        "sortOrder": { "type": "number" },
+        "isEnabled": { "type": "boolean" },
+        "isDraft": { "type": "boolean" },
+        "audience": { "type": "string", "enum": ["public", "members", "approved"] }
+      },
+      "required": ["id", "name", "slug", "accentColor", "layoutType", "filterType", "sortOrder", "isEnabled"]
+    },
+    "Comment": {
+      "title": "Comment Item",
+      "description": "User or guest comment on a content item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "contentId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 50 },
+        "userDisplayName": { "type": "string", "maxLength": 100 },
+        "content": { "type": "string", "maxLength": 1500 },
+        "isApproved": { "type": "boolean" },
+        "isReported": { "type": "boolean" },
+        "likesCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "contentId", "userId", "content", "isApproved", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profile documents"
+    },
+    "/content/{contentId}": {
+      "schema": { "$ref": "#/entities/ContentItem" },
+      "description": "Platform creative content catalog"
+    },
+    "/sections/{sectionId}": {
+      "schema": { "$ref": "#/entities/Section" },
+      "description": "Dynamic homepage section definitions"
+    },
+    "/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/Comment" },
+      "description": "User commentary and threaded interactions"
+    }
+  }
+}

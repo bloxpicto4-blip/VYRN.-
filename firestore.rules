@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Content Collection (Platform creative content catalog)
+    match /content/{contentId} {
+      allow read, write: if true;
+    }
+
+    // Dynamic Sections Collection
+    match /sections/{sectionId} {
+      allow read, write: if true;
+    }
+
+    // Settings Collection
+    match /settings/{docId} {
+      allow read, write: if true;
+    }
+
+    // Categories Collection
+    match /categories/{catId} {
+      allow read, write: if true;
+    }
+
+    // Comments Collection
+    match /comments/{commentId} {
+      allow read, write: if true;
+    }
+
+    // Connection health check
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow read, write: if false;
+    }
+  }
+}
