@@ -30,6 +30,10 @@ import {
   Archive,
   Search,
   X,
+  Database,
+  Cloud,
+  Gamepad2,
+  RefreshCw,
 } from 'lucide-react';
 import {
   ContentItem,
@@ -41,9 +45,18 @@ import {
   ContentType,
   GameCategory,
   PublicationStatus,
+  GameRoom,
+  LocalMigrationSnapshot,
 } from '../../types';
 import { api } from '../../lib/api';
+import { isFirebaseAdminUser, BOOTSTRAPPED_ADMIN_EMAIL } from '../../lib/firebase';
+import {
+  subscribeRooms,
+  deleteRoomInFirestore,
+  MigrationReport,
+} from '../../lib/firestoreService';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { GameFormModal } from './GameFormModal';
 import { GameLaunchModal } from '../game/GameLaunchModal';
 
@@ -56,9 +69,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   initialCreateType,
   onContentUpdated,
 }) => {
-  const { currentUser, changePassword, mustChangePassword } = useAuth();
+  const { currentUser, firebaseUser, loginWithGoogle, changePassword, mustChangePassword } = useAuth();
+  const { showToast, confirmAction } = useToast();
   const [activeTab, setActiveTab] = useState<
-    'games' | 'content' | 'sections' | 'categories' | 'analytics' | 'moderation' | 'users' | 'settings' | 'security'
+    | 'games'
+    | 'content'
+    | 'categories'
+    | 'sections'
+    | 'rooms'
+    | 'analytics'
+    | 'moderation'
+    | 'users'
+    | 'settings'
+    | 'migration'
+    | 'security'
   >(initialCreateType === 'game' ? 'games' : 'games');
 
   // Data states
@@ -68,6 +92,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [moderationQueue, setModerationQueue] = useState<CommentItem[]>([]);
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
+  const [rooms, setRooms] = useState<GameRoom[]>([]);
+
+  // Migration Panel State
+  const [localSnapshot, setLocalSnapshot] = useState<LocalMigrationSnapshot | null>(null);
+  const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [migrationReport, setMigrationReport] = useState<MigrationReport | null>(null);
+  const [migrationError, setMigrationError] = useState('');
+  const [isLoggingGoogle, setIsLoggingGoogle] = useState(false);
 
   // Dedicated Game Management State
   const [isGameModalOpen, setIsGameModalOpen] = useState(false);
@@ -101,9 +134,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Status feedback
   const [notificationMsg, setNotificationMsg] = useState('');
 
+  const isVerifiedFirebaseAdmin = isFirebaseAdminUser(firebaseUser);
+
   useEffect(() => {
     loadAllData();
-  }, []);
+    const unsubRooms = subscribeRooms(setRooms);
+    return () => unsubRooms();
+  }, [firebaseUser?.uid]);
+
+  useEffect(() => {
+    if (activeTab === 'migration' && !localSnapshot && !isLoadingSnapshot) {
+      loadLocalSnapshot();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (initialCreateType === 'game') {
@@ -131,13 +174,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSettings(settingsData);
       setCategories(categoriesData);
 
-      if (currentUser?.role === 'admin') {
+      if (isFirebaseAdminUser(firebaseUser)) {
         const [usersData, modData] = await Promise.all([
           api.getUsers().catch(() => []),
           api.getModerationQueue().catch(() => []),
         ]);
         setUsers(usersData);
         setModerationQueue(modData);
+      } else {
+        setUsers([]);
+        setModerationQueue([]);
       }
     } catch (e) {
       console.error('Error loading admin data:', e);
@@ -149,6 +195,65 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setNotificationMsg(''), 3500);
   };
 
+  const loadLocalSnapshot = async () => {
+    setIsLoadingSnapshot(true);
+    setMigrationError('');
+    try {
+      const snap = await api.getLocalMigrationSnapshot();
+      setLocalSnapshot(snap);
+    } catch (err: any) {
+      setMigrationError(err.message || 'تعذر قراءة ملف التخزين المحلي.');
+    } finally {
+      setIsLoadingSnapshot(false);
+    }
+  };
+
+  const handleMigrateToFirestore = async () => {
+    if (isMigrating) return;
+    setIsMigrating(true);
+    setMigrationError('');
+    try {
+      const report = await api.migrateLocalToFirestore();
+      setMigrationReport(report);
+      showNotification('تم ترحيل البيانات بنجاح إلى Cloud Firestore مع الحفاظ على النسخة المحلية.');
+      await loadAllData();
+      onContentUpdated?.();
+    } catch (err: any) {
+      setMigrationError(err.message || 'فشل الترحيل إلى Firestore.');
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
+  const handleDeleteRoom = async (roomId: string, title: string) => {
+    const confirmed = await confirmAction({
+      title: 'حذف غرفة اللعب',
+      message: `هل أنت متأكد من إغلاق وحذف غرفة "${title}"؟`,
+      confirmLabel: 'حذف الغرفة',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    try {
+      await deleteRoomInFirestore(roomId);
+      showNotification(`تم حذف الغرفة "${title}" بنجاح.`);
+    } catch (err: any) {
+      showToast(err.message || 'فشل حذف الغرفة.', 'error');
+    }
+  };
+
+  const handleVerifyGoogleAdmin = async () => {
+    setIsLoggingGoogle(true);
+    try {
+      await loginWithGoogle();
+      showNotification('تم التحقق من جلسة الإدارة السحابية عبر Firebase.');
+      await loadAllData();
+    } catch (err: any) {
+      showToast(err.message || 'فشل تسجيل الدخول بحساب Google.', 'error');
+    } finally {
+      setIsLoggingGoogle(false);
+    }
+  };
+
   // Dedicated Game Management Handlers
   const openGameModal = (game?: ContentItem | null) => {
     setGameToEdit(game || null);
@@ -158,8 +263,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleGameSaved = (savedGame: ContentItem, mode: 'published' | 'draft') => {
     showNotification(
       mode === 'published'
-        ? `تم نشر اللعبة "${savedGame.title}" بنجاح!`
-        : `تم حفظ اللعبة "${savedGame.title}" كمسودة بنجاح.`
+        ? `تم نشر اللعبة "${savedGame.title}" في Cloud Firestore بنجاح!`
+        : `تم حفظ اللعبة "${savedGame.title}" كمسودة في Firestore.`
     );
     setIsGameModalOpen(false);
     setGameToEdit(null);
@@ -176,7 +281,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       loadAllData();
       onContentUpdated?.();
     } catch (err: any) {
-      alert(err.message || 'فشل تحديث الحالة.');
+      showToast(err.message || 'فشل تحديث الحالة.', 'error');
     }
   };
 
@@ -210,7 +315,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           type: 'game',
           description: newCatDescription.trim(),
         });
-        showNotification(`تمت إضافة تصنيف "${newCatName.trim()}" بنجاح.`);
+        showNotification(`تمت إضافة تصنيف "${newCatName.trim()}" إلى Firestore بنجاح.`);
       }
       setNewCatName('');
       setNewCatDescription('');
@@ -218,20 +323,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsCategoriesModalOpen(false);
       loadAllData();
     } catch (err: any) {
-      alert(err.message || 'فشل حفظ التصنيف.');
+      showToast(err.message || 'فشل حفظ التصنيف.', 'error');
     } finally {
       setIsAddingCat(false);
     }
   };
 
   const handleDeleteCategory = async (id: string, name: string) => {
-    if (!confirm(`هل أنت متأكد من حذف تصنيف "${name}"؟`)) return;
+    const confirmed = await confirmAction({
+      title: 'حذف التصنيف',
+      message: `هل أنت متأكد من حذف تصنيف "${name}"؟`,
+      confirmLabel: 'حذف التصنيف',
+      destructive: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteCategory(id);
       showNotification(`تم حذف التصنيف بنجاح.`);
       loadAllData();
     } catch (err: any) {
-      alert(err.message || 'فشل حذف التصنيف.');
+      showToast(err.message || 'فشل حذف التصنيف.', 'error');
     }
   };
 
@@ -280,36 +391,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveContent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem?.title || !editingItem?.type || !editingItem?.category) {
-      alert('يرجى ملء الحقول المطلوبة: العنوان، النوع، والتصنيف.');
+      showToast('يرجى ملء الحقول المطلوبة: العنوان، النوع، والتصنيف.', 'warning');
       return;
     }
 
     try {
       if (editingItem.id) {
         await api.updateContent(editingItem.id, editingItem);
-        showNotification('تم تحديث المحتوى بنجاح.');
+        showNotification('تم تحديث المحتوى في Cloud Firestore بنجاح.');
       } else {
         await api.createContent(editingItem);
-        showNotification('تم نشر الإصدار الإبداعي الجديد بنجاح.');
+        showNotification('تم نشر الإصدار الإبداعي الجديد في Firestore بنجاح.');
       }
       setIsContentModalOpen(false);
       setEditingItem(null);
       loadAllData();
       onContentUpdated?.();
     } catch (err: any) {
-      alert(err.message || 'حدث خطأ أثناء حفظ المحتوى.');
+      showToast(err.message || 'حدث خطأ أثناء حفظ المحتوى.', 'error');
     }
   };
 
   const handleDeleteContent = async (id: string) => {
-    if (!confirm('هل أنت متأكد من رغبتك في حذف هذا العنصر نهائياً؟')) return;
+    const confirmed = await confirmAction({
+      title: 'حذف المحتوى نهائياً',
+      message: 'هل أنت متأكد من رغبتك في حذف هذا العنصر نهائياً من قاعدة البيانات السحابية؟',
+      confirmLabel: 'حذف نهائي',
+      destructive: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteContent(id);
-      showNotification('تم حذف العنصر بنجاح.');
+      showNotification('تم حذف العنصر من Firestore بنجاح.');
       loadAllData();
       onContentUpdated?.();
     } catch (err: any) {
-      alert(err.message || 'فشل حذف العنصر.');
+      showToast(err.message || 'فشل حذف العنصر.', 'error');
     }
   };
 
@@ -317,34 +434,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSaveSection = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSection?.name) {
-      alert('اسم القسم حقل مطلوب.');
+      showToast('اسم القسم حقل مطلوب.', 'warning');
       return;
     }
 
     try {
       if (editingSection.id) {
         await api.updateSection(editingSection.id, editingSection);
-        showNotification('تم تحديث إعدادات القسم.');
+        showNotification('تم تحديث إعدادات القسم في Firestore.');
       } else {
         await api.createSection(editingSection);
-        showNotification('تم إنشاء القسم التفاعلي بنجاح.');
+        showNotification('تم إنشاء القسم التفاعلي في Firestore بنجاح.');
       }
       setIsSectionModalOpen(false);
       setEditingSection(null);
       loadAllData();
+      onContentUpdated?.();
     } catch (err: any) {
-      alert(err.message || 'حدث خطأ أثناء حفظ القسم.');
+      showToast(err.message || 'حدث خطأ أثناء حفظ القسم.', 'error');
     }
   };
 
   const handleDeleteSection = async (id: string) => {
-    if (!confirm('هل أنت متأكد من رغبتك في إزالة هذا القسم؟')) return;
+    const confirmed = await confirmAction({
+      title: 'إزالة القسم',
+      message: 'هل أنت متأكد من رغبتك في إزالة هذا القسم؟',
+      confirmLabel: 'إزالة القسم',
+      destructive: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteSection(id);
       showNotification('تمت إزالة القسم بنجاح.');
       loadAllData();
+      onContentUpdated?.();
     } catch (err: any) {
-      alert(err.message || 'فشلت إزالة القسم.');
+      showToast(err.message || 'فشلت إزالة القسم.', 'error');
     }
   };
 
@@ -364,7 +489,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await api.reorderSections(orderPayload);
       showNotification('تم تحديث ترتيب الأقسام بنجاح.');
     } catch (err: any) {
-      alert(err.message || 'فشل حفظ الترتيب الجديد.');
+      showToast(err.message || 'فشل حفظ الترتيب الجديد.', 'error');
       loadAllData();
     }
   };
@@ -376,7 +501,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       showNotification('تمت الموافقة على التعليق.');
       loadAllData();
     } catch (err: any) {
-      alert(err.message || 'فشلت الموافقة.');
+      showToast(err.message || 'فشلت الموافقة.', 'error');
     }
   };
 
@@ -386,7 +511,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       showNotification('تم حذف التعليق.');
       loadAllData();
     } catch (err: any) {
-      alert(err.message || 'فشل حذف التعليق.');
+      showToast(err.message || 'فشل حذف التعليق.', 'error');
     }
   };
 
@@ -397,7 +522,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       showNotification('تم تحديث رتبة المستخدم.');
       loadAllData();
     } catch (err: any) {
-      alert(err.message || 'فشل تحديث الرتبة.');
+      showToast(err.message || 'فشل تحديث الرتبة.', 'error');
     }
   };
 
@@ -407,9 +532,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!settings) return;
     try {
       await api.updateSettings(settings);
-      showNotification('تم حفظ إعدادات المنصة بنجاح.');
+      showNotification('تم حفظ إعدادات المنصة في Cloud Firestore بنجاح.');
+      onContentUpdated?.();
     } catch (err: any) {
-      alert(err.message || 'فشل حفظ الإعدادات.');
+      showToast(err.message || 'فشل حفظ الإعدادات.', 'error');
     }
   };
 
@@ -458,12 +584,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
+      {/* Firebase Cloud Admin Session Banner */}
+      {!isVerifiedFirebaseAdmin ? (
+        <div className="p-4 bg-amber-500/10 border border-amber-500/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-[#F2EBDD]">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <Cloud className="w-4 h-4 text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+            <div>
+              <strong className="text-amber-300">توثيق Firebase Cloud Firestore مطلوب للكتابة:</strong>{' '}
+              أنت متصل حالياً بالجلسة المحلية فقط، بينما تحمي قواعد <code className="font-mono text-[#D7FF38]">firestore.rules</code> عمليات النشر والتعديل والترحيل. سجّل الدخول بحساب الإدارة الموثق (<code className="font-mono text-[#D7FF38]" dir="ltr">{BOOTSTRAPPED_ADMIN_EMAIL}</code>) لتنفيذ التعديلات السحابية.
+            </div>
+          </div>
+          <button
+            onClick={handleVerifyGoogleAdmin}
+            disabled={isLoggingGoogle}
+            className="px-4 py-2 bg-[#D7FF38] hover:bg-[#c8f028] text-[#191A17] font-bold rounded-lg text-xs shrink-0 cursor-pointer disabled:opacity-50"
+          >
+            {isLoggingGoogle ? 'جاري التوثيق...' : 'تسجيل الدخول بحساب Google الموثق'}
+          </button>
+        </div>
+      ) : (
+        <div className="px-4 py-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3 text-xs text-emerald-300">
+          <div className="flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              متصل مباشرة بـ <strong>Cloud Firestore</strong> كمدير موثق ({firebaseUser?.email})
+            </span>
+          </div>
+          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30">
+            FIRESTORE LIVE
+          </span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#292C25] pb-6">
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-[#FF5A1F] uppercase tracking-wider mb-1">
             <Shield className="w-3.5 h-3.5" />
-            <span>لوحة تحكم وإدارة منصة VYRN</span>
+            <span>لوحة تحكم وإدارة منصة VYRN السحابية</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-[#F2EBDD] font-mono">
             إدارة المحتوى والعمليات الإبداعية
@@ -485,10 +643,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           { id: 'content', label: `كافة المحتويات (${items.length})`, icon: Layers },
           { id: 'categories', label: `تصنيفات الألعاب (${categories.length})`, icon: Tag },
           { id: 'sections', label: `الأقسام (${sections.length})`, icon: Globe },
+          { id: 'rooms', label: `غرف اللعب (${rooms.length})`, icon: Gamepad2 },
           { id: 'analytics', label: 'الإحصائيات الحقيقية', icon: BarChart3 },
           { id: 'moderation', label: `المراجعة والبلاغات (${moderationQueue.length})`, icon: MessageSquare },
           { id: 'users', label: 'المستخدمون والاعتماد', icon: Users },
           { id: 'settings', label: 'إعدادات المنصة', icon: Settings },
+          { id: 'migration', label: 'الترحيل السحابي', icon: Database },
           { id: 'security', label: 'الأمان وكلمة المرور', icon: Lock },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -1323,6 +1483,212 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>حفظ الإعدادات</span>
           </button>
         </form>
+      )}
+
+      {/* TAB: Multiplayer Rooms Management */}
+      {activeTab === 'rooms' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-bold font-mono text-[#F2EBDD] flex items-center gap-2">
+                <Gamepad2 className="w-5 h-5 text-[#FF5A1F]" />
+                <span>إدارة غرف اللعب الجماعي ({rooms.length})</span>
+              </h2>
+              <p className="text-xs text-[#F2EBDD]/60 mt-1">
+                متابعة الغرف النشطة والمنتهية في Cloud Firestore مع صلاحية إغلاق وحذف الغرف المخالفة أو المهجورة.
+              </p>
+            </div>
+          </div>
+
+          {rooms.length === 0 ? (
+            <div className="p-12 bg-[#1C1E19] border border-[#2D3027] rounded-xl text-center space-y-2">
+              <Gamepad2 className="w-8 h-8 text-[#F2EBDD]/30 mx-auto" />
+              <p className="text-xs text-[#F2EBDD]/60">لا توجد غرف لعب جماعي مسجلة حالياً في Firestore.</p>
+            </div>
+          ) : (
+            <div className="bg-[#1C1E19] border border-[#2D3027] rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-xs text-[#F2EBDD]/80">
+                  <thead className="bg-[#161713] text-[#F2EBDD]/50 border-b border-[#292C25] font-mono uppercase text-[10px]">
+                    <tr>
+                      <th className="p-3.5">اسم الغرفة</th>
+                      <th className="p-3.5">الرمز</th>
+                      <th className="p-3.5">اللعبة</th>
+                      <th className="p-3.5">المضيف</th>
+                      <th className="p-3.5">اللاعبون</th>
+                      <th className="p-3.5">الحالة</th>
+                      <th className="p-3.5 text-left">إجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#262822]">
+                    {rooms.map((room) => (
+                      <tr key={room.id} className="hover:bg-[#22241F]">
+                        <td className="p-3.5 font-bold text-[#F2EBDD]">{room.title}</td>
+                        <td className="p-3.5 font-mono text-[#D7FF38]">{room.code}</td>
+                        <td className="p-3.5">{room.gameTitle}</td>
+                        <td className="p-3.5 text-[#F2EBDD]/70">{room.hostName}</td>
+                        <td className="p-3.5 font-mono tabular-nums">
+                          {room.playerCount} / {room.maxPlayers}
+                        </td>
+                        <td className="p-3.5">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono ${
+                              room.status === 'waiting'
+                                ? 'bg-amber-500/15 text-amber-300'
+                                : room.status === 'playing'
+                                ? 'bg-emerald-500/15 text-emerald-300'
+                                : 'bg-slate-500/15 text-slate-300'
+                            }`}
+                          >
+                            {room.status === 'waiting'
+                              ? 'في الانتظار'
+                              : room.status === 'playing'
+                              ? 'قيد اللعب'
+                              : 'منتهية'}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-left">
+                          <button
+                            onClick={() => handleDeleteRoom(room.id, room.title)}
+                            className="p-1.5 hover:text-red-400 bg-[#242720] rounded-lg cursor-pointer"
+                            title="حذف الغرفة"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: Safe Local-to-Cloud Firestore Migration */}
+      {activeTab === 'migration' && (
+        <div className="space-y-6">
+          <div className="p-5 bg-[#1C1E19] border border-[#2D3027] rounded-2xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold font-mono text-[#F2EBDD] flex items-center gap-2">
+                  <Database className="w-5 h-5 text-[#D7FF38]" />
+                  <span>ترحيل البيانات الآمن إلى Cloud Firestore</span>
+                </h2>
+                <p className="text-xs text-[#F2EBDD]/60 mt-1 leading-relaxed">
+                  مقارنة شاملة بين ملف التخزين المحلي (<code className="font-mono text-[#D7FF38]">data/vyrn_store.json</code>) وقاعدة البيانات السحابية. تبقى النسخة المحلية محفوظة بالكامل دون حذف أثناء الترحيل وبعده.
+                </p>
+              </div>
+              <button
+                onClick={loadLocalSnapshot}
+                disabled={isLoadingSnapshot}
+                className="px-4 py-2 bg-[#252822] hover:bg-[#2F322B] border border-[#383C32] text-xs font-bold text-[#F2EBDD] rounded-xl flex items-center gap-2 cursor-pointer shrink-0 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSnapshot ? 'animate-spin' : ''}`} />
+                <span>تحديث القراءة المحلية</span>
+              </button>
+            </div>
+
+            {migrationError && (
+              <div className="p-3 bg-red-500/15 border border-red-500/40 rounded-xl text-xs text-red-300">
+                {migrationError}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Local Store Summary */}
+              <div className="p-4 bg-[#141512] border border-[#2A2D25] rounded-xl space-y-3">
+                <div className="flex items-center justify-between border-b border-[#242720] pb-2">
+                  <span className="text-xs font-bold font-mono text-[#F2EBDD]">النسخة المحلية (vyrn_store.json)</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#252822] text-[#F2EBDD]/60">
+                    محفوظة بأمان
+                  </span>
+                </div>
+                {localSnapshot ? (
+                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                    <div className="p-2.5 bg-[#1B1D18] rounded-lg">
+                      <span className="text-[#F2EBDD]/50 block text-[10px]">العناصر والألعاب</span>
+                      <span className="text-base font-bold text-[#F2EBDD]">{localSnapshot.items.length}</span>
+                    </div>
+                    <div className="p-2.5 bg-[#1B1D18] rounded-lg">
+                      <span className="text-[#F2EBDD]/50 block text-[10px]">التصنيفات</span>
+                      <span className="text-base font-bold text-[#F2EBDD]">{localSnapshot.categories.length}</span>
+                    </div>
+                    <div className="p-2.5 bg-[#1B1D18] rounded-lg">
+                      <span className="text-[#F2EBDD]/50 block text-[10px]">الأقسام</span>
+                      <span className="text-base font-bold text-[#F2EBDD]">{localSnapshot.sections.length}</span>
+                    </div>
+                    <div className="p-2.5 bg-[#1B1D18] rounded-lg">
+                      <span className="text-[#F2EBDD]/50 block text-[10px]">الإعدادات المحلية</span>
+                      <span className="text-base font-bold text-emerald-400">
+                        {localSnapshot.settings ? 'متوفرة' : 'غير متوفرة'}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#F2EBDD]/50 py-4 text-center">
+                    {isLoadingSnapshot ? 'جاري فحص النسخة المحلية...' : 'اضغط "تحديث القراءة المحلية" لمعاينة البيانات.'}
+                  </p>
+                )}
+              </div>
+
+              {/* Cloud Firestore Summary */}
+              <div className="p-4 bg-[#141512] border border-[#FF5A1F]/40 rounded-xl space-y-3">
+                <div className="flex items-center justify-between border-b border-[#242720] pb-2">
+                  <span className="text-xs font-bold font-mono text-[#FF5A1F]">قاعدة البيانات السحابية (Firestore)</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#D7FF38]/15 text-[#D7FF38]">
+                    القاعدة الأساسية
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="p-2.5 bg-[#1B1D18] rounded-lg">
+                    <span className="text-[#F2EBDD]/50 block text-[10px]">العناصر والألعاب</span>
+                    <span className="text-base font-bold text-[#D7FF38]">{items.length}</span>
+                  </div>
+                  <div className="p-2.5 bg-[#1B1D18] rounded-lg">
+                    <span className="text-[#F2EBDD]/50 block text-[10px]">التصنيفات</span>
+                    <span className="text-base font-bold text-[#D7FF38]">{categories.length}</span>
+                  </div>
+                  <div className="p-2.5 bg-[#1B1D18] rounded-lg">
+                    <span className="text-[#F2EBDD]/50 block text-[10px]">الأقسام</span>
+                    <span className="text-base font-bold text-[#D7FF38]">{sections.length}</span>
+                  </div>
+                  <div className="p-2.5 bg-[#1B1D18] rounded-lg">
+                    <span className="text-[#F2EBDD]/50 block text-[10px]">غرف اللعب</span>
+                    <span className="text-base font-bold text-[#D7FF38]">{rooms.length}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {migrationReport && (
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 space-y-1">
+                <div className="font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>تمت عملية الترحيل السحابي بنجاح:</span>
+                </div>
+                <p className="font-mono text-[11px]">
+                  الإعدادات: {migrationReport.settingsMigrated ? 'تم التحديث' : '—'} | التصنيفات: {migrationReport.categoriesMigrated} | الأقسام: {migrationReport.sectionsMigrated} | المحتوى: {migrationReport.contentMigrated} | الإنجازات: {migrationReport.achievementsSeeded}
+                </p>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#262822]">
+              <p className="text-[11px] text-[#F2EBDD]/50">
+                الترحيل يستخدم <code className="font-mono text-[#D7FF38]">writeBatch</code> لضمان عدم فقدان أي سجل أو تكرار المحتوى الموجود سحابياً.
+              </p>
+              <button
+                onClick={handleMigrateToFirestore}
+                disabled={isMigrating || !isVerifiedFirebaseAdmin}
+                className="px-6 py-2.5 bg-[#FF5A1F] hover:bg-[#FF3300] disabled:opacity-50 text-white font-bold rounded-xl text-xs cursor-pointer flex items-center gap-2 shadow-lg shadow-[#FF5A1F]/20"
+              >
+                <Cloud className="w-4 h-4" />
+                <span>{isMigrating ? 'جاري الترحيل إلى Firestore...' : 'ترحيل البيانات الآن إلى Cloud Firestore'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* TAB 7: Security & Admin Credentials */}

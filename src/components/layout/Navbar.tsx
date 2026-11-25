@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Bell, Heart, Shield, LogIn, Menu, X } from 'lucide-react';
+import { Search, Bell, Heart, Shield, LogIn, Menu, X, Trophy } from 'lucide-react';
 import { Logo } from '../brand/Logo';
 import { useAuth } from '../../context/AuthContext';
 import { NotificationItem } from '../../types';
@@ -25,7 +25,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   notifications,
   favoritesCount,
 }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, userStats } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
@@ -34,6 +34,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     { label: 'الرئيسية', view: 'home' },
     { label: 'استكشاف', view: 'discover' },
     { label: 'الألعاب', view: 'category', filter: 'game' },
+    { label: 'غرف اللعب', view: 'rooms' },
+    { label: 'الإنجازات', view: 'achievements' },
     { label: 'التطبيقات', view: 'category', filter: 'app' },
     { label: 'المشاريع', view: 'category', filter: 'project' },
     { label: 'الكتب', view: 'category', filter: 'book' },
@@ -146,17 +148,29 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Profile or Sign In */}
           {currentUser ? (
-            <button
-              onClick={onOpenProfile}
-              className="flex items-center gap-2 pr-2 pl-3 py-1 rounded-lg bg-[#22241F] border border-[#343831] hover:border-[#FF5A1F]/50 transition-colors cursor-pointer"
-            >
-              <div className="w-6 h-6 rounded-full bg-[#FF5A1F]/20 text-[#FF5A1F] flex items-center justify-center text-xs font-mono font-bold">
-                {currentUser.displayName.charAt(0)}
-              </div>
-              <span className="text-xs font-semibold text-[#F2EBDD] max-w-[100px] truncate hidden md:inline">
-                {currentUser.displayName}
-              </span>
-            </button>
+            <div className="flex items-center gap-2">
+              {userStats && (
+                <button
+                  onClick={() => onNavigate('achievements')}
+                  className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#D7FF38]/10 border border-[#D7FF38]/30 text-[#D7FF38] text-[11px] font-mono font-bold cursor-pointer hover:bg-[#D7FF38]/20 transition-colors"
+                  title="النقاط والإنجازات"
+                >
+                  <Trophy className="w-3 h-3" />
+                  <span className="tabular-nums">{userStats.points}</span>
+                </button>
+              )}
+              <button
+                onClick={onOpenProfile}
+                className="flex items-center gap-2 pr-2 pl-3 py-1 rounded-lg bg-[#22241F] border border-[#343831] hover:border-[#FF5A1F]/50 transition-colors cursor-pointer"
+              >
+                <div className="w-6 h-6 rounded-full bg-[#FF5A1F]/20 text-[#FF5A1F] flex items-center justify-center text-xs font-mono font-bold">
+                  {currentUser.displayName.charAt(0)}
+                </div>
+                <span className="text-xs font-semibold text-[#F2EBDD] max-w-[100px] truncate hidden md:inline">
+                  {currentUser.displayName}
+                </span>
+              </button>
+            </div>
           ) : (
             <button
               onClick={onOpenAuth}

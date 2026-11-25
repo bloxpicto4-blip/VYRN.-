@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { ContentItem, GameDeliveryType, GameLaunchMode, GameCategory, PublicationStatus } from '../../types';
 import { api } from '../../lib/api';
+import { useToast } from '../../context/ToastContext';
 
 interface GameFormModalProps {
   gameToEdit?: ContentItem | null;
@@ -39,6 +40,7 @@ export const GameFormModal: React.FC<GameFormModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { showToast } = useToast();
   // Form core fields
   const [title, setTitle] = useState(gameToEdit?.title || '');
   const [summary, setSummary] = useState(gameToEdit?.summary || '');
@@ -150,19 +152,19 @@ export const GameFormModal: React.FC<GameFormModalProps> = ({
       setNewCatName('');
       setShowAddCategory(false);
     } catch (err: any) {
-      alert(err.message || 'فشل إضافة التصنيف.');
+      showToast(err.message || 'فشل إضافة التصنيف.', 'error');
     } finally {
       setIsAddingCat(false);
     }
   };
 
-  // Image upload handler via FileReader Base64 & Server Storage
+  // Image upload handler via Firebase Storage (production) or local dev upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      alert('حجم الصورة كبير جداً. يرجى اختيار صورة أقل من 5 ميجابايت.');
+      showToast('حجم الصورة كبير جداً. يرجى اختيار صورة أقل من 5 ميجابايت.', 'warning');
       return;
     }
 
@@ -170,15 +172,21 @@ export const GameFormModal: React.FC<GameFormModalProps> = ({
     reader.onload = async () => {
       if (typeof reader.result === 'string') {
         const rawResult = reader.result;
+        const previousCover = coverImage;
         setCoverImage(rawResult);
         setIsUploadingImage(true);
         try {
-          const res = await api.uploadFile(rawResult, file.name);
+          const res = await api.uploadFile(rawResult, file.name, 'covers');
           if (res?.url) {
             setCoverImage(res.url);
+            showToast('تم رفع صورة الغلاف إلى Firebase Storage بنجاح.', 'success');
           }
-        } catch (err) {
-          console.warn('Local preview preserved, server upload note:', err);
+        } catch (err: any) {
+          setCoverImage(previousCover);
+          showToast(
+            err?.message || 'تعذر رفع الصورة. استخدم رابط صورة مباشر أو تأكد من تفعيل Firebase Storage.',
+            'error'
+          );
         } finally {
           setIsUploadingImage(false);
         }

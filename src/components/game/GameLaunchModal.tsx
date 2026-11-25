@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Maximize2,
@@ -30,6 +30,7 @@ export const GameLaunchModal: React.FC<GameLaunchModalProps> = ({ game, onClose 
   const [iframeError, setIframeError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const trackedGameIdRef = useRef<string | null>(null);
 
   const config = game.gameConfig || {
     deliveryType: 'web_game',
@@ -48,6 +49,16 @@ export const GameLaunchModal: React.FC<GameLaunchModalProps> = ({ game, onClose 
   const handleLaunchTrack = () => {
     api.trackLaunch(game.id).catch(() => {});
   };
+
+  useEffect(() => {
+    if (
+      (config.launchMode === 'internal_embed' || config.launchMode === 'internal_page') &&
+      trackedGameIdRef.current !== game.id
+    ) {
+      trackedGameIdRef.current = game.id;
+      handleLaunchTrack();
+    }
+  }, [game.id, config.launchMode]);
 
   const handleRestart = () => {
     setReloadKey((prev) => prev + 1);

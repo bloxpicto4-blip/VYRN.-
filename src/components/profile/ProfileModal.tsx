@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, LogOut, Check, Shield } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 
 interface ProfileModalProps {
   onClose: () => void;
@@ -9,6 +10,7 @@ interface ProfileModalProps {
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, onOpenAdmin }) => {
   const { currentUser, updateProfile, logout } = useAuth();
+  const { showToast } = useToast();
   const [displayName, setDisplayName] = useState(currentUser?.displayName || '');
   const [bio, setBio] = useState(currentUser?.bio || '');
   const [showFavorites, setShowFavorites] = useState(
@@ -42,9 +44,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ onClose, onOpenAdmin
         },
       });
       setIsSaved(true);
+      showToast('تم حفظ تعديلات الملف الشخصي.', 'success');
       setTimeout(() => setIsSaved(false), 2000);
     } catch (e: any) {
-      alert(e.message || 'فشل تحديث الملف الشخصي.');
+      showToast(e.message || 'فشل تحديث الملف الشخصي.', 'error');
     }
   };
 

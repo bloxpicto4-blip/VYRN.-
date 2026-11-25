@@ -2,6 +2,7 @@ import React from 'react';
 import { Play, ArrowLeft, Plus, Shield, Sparkles } from 'lucide-react';
 import { ContentItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import heroBannerImg from '../../assets/images/vyrn_hero_banner_1791925647448.jpg';
 
 interface HeroBannerProps {
   featuredItem?: ContentItem;
@@ -89,7 +90,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
           <div className="lg:col-span-5 relative flex items-center">
             <div className="relative w-full aspect-[4/3] lg:aspect-auto lg:h-[420px] rounded-2xl overflow-hidden border border-[#2D3027] shadow-2xl bg-[#141512] group">
               <img
-                src="/src/assets/images/vyrn_hero_banner_1791925647448.jpg"
+                src={heroBannerImg}
                 alt="VYRN Nexus"
                 className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
               />

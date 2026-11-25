@@ -15,7 +15,7 @@
       "username": "boda",
       "displayName": "مدير المنصة (boda)",
       "email": "boda@vyrn.studio",
-      "passwordHash": "28f7eac2ad85c791c9d104a3b91eb84a165c33fc52806288f41e86d36c3679cf",
+      "passwordHash": "scrypt$2dca20029f8e8ebaeac4cc8cf2f99ffe$2d2abc42368f50e88f8006a308ecb08f1574553fffdfabc60a152581796a86dd962927964cd14e19465c16a9e6d92017ae162a9f79935252dd6ca22e936f6912",
       "role": "admin",
       "avatarUrl": "",
       "bio": "المؤسس ومدير المحتوى لمنصة وعالم VYRN الإبداعي.",

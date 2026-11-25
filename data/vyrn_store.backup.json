@@ -1,0 +1,145 @@
+{
+  "settings": {
+    "brandName": "VYRN",
+    "brandTagline": "عالم تصنعه بنفسك.",
+    "primaryAccent": "#FF5A1F",
+    "secondaryAccent": "#D7FF38",
+    "showIntroAnimation": true,
+    "allowGuestInteractions": true,
+    "commentModerationRequired": false,
+    "maintenanceMode": false
+  },
+  "users": [
+    {
+      "id": "usr_admin_001",
+      "username": "boda",
+      "displayName": "مدير المنصة (boda)",
+      "email": "boda@vyrn.studio",
+      "passwordHash": "scrypt$2dca20029f8e8ebaeac4cc8cf2f99ffe$2d2abc42368f50e88f8006a308ecb08f1574553fffdfabc60a152581796a86dd962927964cd14e19465c16a9e6d92017ae162a9f79935252dd6ca22e936f6912",
+      "role": "admin",
+      "avatarUrl": "",
+      "bio": "المؤسس ومدير المحتوى لمنصة وعالم VYRN الإبداعي.",
+      "isApproved": true,
+      "mustChangePassword": false,
+      "createdAt": "2026-10-16T10:58:00.528Z",
+      "privacySettings": {
+        "showFavorites": true,
+        "showActivity": true
+      }
+    }
+  ],
+  "items": [],
+  "sections": [
+    {
+      "id": "sec_games_01",
+      "slug": "games",
+      "name": "الألعاب",
+      "description": "مساحة ألعابك وتجارب المحاكاة التفاعلية.",
+      "accentColor": "#FF5A1F",
+      "layoutType": "bento",
+      "filterType": "category",
+      "categoryTarget": "game",
+      "sortOrder": 1,
+      "isEnabled": true,
+      "isDraft": false,
+      "audience": "public"
+    },
+    {
+      "id": "sec_apps_02",
+      "slug": "apps",
+      "name": "التطبيقات",
+      "description": "الأدوات البرمجية والتطبيقات الرقمية المبتكرة.",
+      "accentColor": "#D7FF38",
+      "layoutType": "carousel",
+      "filterType": "category",
+      "categoryTarget": "app",
+      "sortOrder": 2,
+      "isEnabled": true,
+      "isDraft": false,
+      "audience": "public"
+    },
+    {
+      "id": "sec_projects_03",
+      "slug": "projects",
+      "name": "المشاريع",
+      "description": "المشاريع الهندسية والبرمجية مفتوحة المصدر.",
+      "accentColor": "#FF5A1F",
+      "layoutType": "grid",
+      "filterType": "category",
+      "categoryTarget": "project",
+      "sortOrder": 3,
+      "isEnabled": true,
+      "isDraft": false,
+      "audience": "public"
+    },
+    {
+      "id": "sec_books_04",
+      "slug": "books",
+      "name": "الكتب والمنشورات",
+      "description": "المنشورات المعمارية والأبحاث والمقالات التصميمية.",
+      "accentColor": "#F2EBDD",
+      "layoutType": "grid",
+      "filterType": "category",
+      "categoryTarget": "book",
+      "sortOrder": 4,
+      "isEnabled": true,
+      "isDraft": false,
+      "audience": "public"
+    },
+    {
+      "id": "sec_podcasts_05",
+      "slug": "podcasts",
+      "name": "البودكاست",
+      "description": "الحلقات الصوتية والتسجيلات الإبداعية الاستكشافية.",
+      "accentColor": "#D7FF38",
+      "layoutType": "media_showcase",
+      "filterType": "category",
+      "categoryTarget": "podcast",
+      "sortOrder": 5,
+      "isEnabled": true,
+      "isDraft": false,
+      "audience": "public"
+    }
+  ],
+  "comments": [],
+  "likes": [],
+  "favorites": [],
+  "notifications": [],
+  "categories": [
+    {
+      "id": "cat_g1",
+      "type": "game",
+      "name": "ألعاب الأكشن والسرعة",
+      "slug": "action-games",
+      "description": "ألعاب قتالية وسريعة"
+    },
+    {
+      "id": "cat_g2",
+      "type": "game",
+      "name": "المحاكاة والتجارب التفاعلية",
+      "slug": "simulation-games",
+      "description": "محاكيات واقعية وتجارب فيزيائية"
+    },
+    {
+      "id": "cat_g3",
+      "type": "game",
+      "name": "الخيال العلمي والمستقبل",
+      "slug": "scifi-games",
+      "description": "عوالم مستقبلية وفضاء سيبراني"
+    },
+    {
+      "id": "cat_g4",
+      "type": "game",
+      "name": "الألغاز والتحدي الذهني",
+      "slug": "puzzle-games",
+      "description": "تحديات ذكاء واستراتيجية"
+    },
+    {
+      "id": "cat_g5",
+      "type": "game",
+      "name": "ألعاب متصفح خفيفة",
+      "slug": "web-arcade",
+      "description": "تشغيل مباشر وخفيف"
+    }
+  ]
+}

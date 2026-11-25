@@ -17,6 +17,7 @@ import {
 import { ContentItem, CommentItem } from '../../types';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { PodcastPlayer } from '../media/PodcastPlayer';
 
 interface ContentDetailPageProps {
@@ -25,6 +26,7 @@ interface ContentDetailPageProps {
   onLaunchGame: (item: ContentItem) => void;
   onToggleFavorite?: (id: string) => void;
   isFavorite?: boolean;
+  onRequireAuth?: () => void;
 }
 
 export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
@@ -33,8 +35,10 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
   onLaunchGame,
   onToggleFavorite,
   isFavorite = false,
+  onRequireAuth,
 }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, isFirebaseAuthenticated } = useAuth();
+  const { showToast, confirmAction } = useToast();
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [commentInput, setCommentInput] = useState('');
   const [replyParentId, setReplyParentId] = useState<string | null>(null);
@@ -48,8 +52,9 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
 
   useEffect(() => {
     loadComments();
+    api.checkIsLiked(item.id).then(setHasLiked).catch(() => setHasLiked(false));
     window.location.hash = `item/${item.id}`;
-  }, [item.id]);
+  }, [item.id, currentUser?.id]);
 
   const loadComments = async () => {
     try {
@@ -61,12 +66,17 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
   };
 
   const handleToggleLike = async () => {
+    if (!currentUser || !isFirebaseAuthenticated) {
+      showToast('يرجى تسجيل الدخول بحساب Firebase للإعجاب بالمحتوى.', 'info');
+      onRequireAuth?.();
+      return;
+    }
     try {
       const res = await api.toggleLike(item.id);
       setLikesCount(res.count);
       setHasLiked(res.liked);
-    } catch (e) {
-      console.error('Error liking:', e);
+    } catch (e: any) {
+      showToast(e?.message || 'تعذر تسجيل الإعجاب حالياً.', 'error');
     }
   };
 
@@ -79,6 +89,11 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
   };
 
   const handlePostComment = async (parentId?: string) => {
+    if (!currentUser || !isFirebaseAuthenticated) {
+      showToast('يجب تسجيل الدخول بحساب Firebase للمشاركة في التعليقات.', 'info');
+      onRequireAuth?.();
+      return;
+    }
     const text = parentId ? replyInput : commentInput;
     if (!text.trim()) return;
 
@@ -96,33 +111,46 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
         setCommentInput('');
       }
       await loadComments();
+      showToast('تم نشر التعليق بنجاح.', 'success');
     } catch (err: any) {
-      alert(err.message || 'فشل نشر التعليق.');
+      showToast(err.message || 'فشل نشر التعليق.', 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDeleteComment = async (id: string) => {
-    if (!confirm('هل أنت متأكد من حذف هذا التعليق؟')) return;
+    const confirmed = await confirmAction({
+      title: 'حذف التعليق',
+      message: 'هل أنت متأكد من حذف هذا التعليق؟',
+      confirmLabel: 'حذف التعليق',
+      destructive: true,
+    });
+    if (!confirmed) return;
     try {
       await api.deleteComment(id);
       await loadComments();
+      showToast('تم حذف التعليق بنجاح.', 'success');
     } catch (err: any) {
-      alert(err.message || 'فشل حذف التعليق.');
+      showToast(err.message || 'فشل حذف التعليق.', 'error');
     }
   };
 
   const handleReportComment = async (id: string) => {
+    if (!currentUser || !isFirebaseAuthenticated) {
+      showToast('يرجى تسجيل الدخول لإرسال بلاغ.', 'info');
+      onRequireAuth?.();
+      return;
+    }
     if (!reportReason.trim()) return;
     try {
       await api.reportComment(id, reportReason);
-      alert('تم إرسال البلاغ لمراجعة الإدارة.');
+      showToast('تم إرسال البلاغ لمراجعة الإدارة.', 'success');
       setReportingCommentId(null);
       setReportReason('');
       await loadComments();
     } catch (err: any) {
-      alert(err.message || 'فشل إرسال البلاغ.');
+      showToast(err.message || 'فشل إرسال البلاغ.', 'error');
     }
   };
 
@@ -364,27 +392,46 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
           </div>
 
           {/* New Comment Box */}
-          <div className="bg-[#1E201B] border border-[#2D3027] rounded-xl p-4 space-y-3">
-            <textarea
-              value={commentInput || ''}
-              onChange={(e) => setCommentInput(e.target.value)}
-              placeholder="شارك برأيك أو تقييمك التقني..."
-              rows={3}
-              className="w-full bg-[#161713] border border-[#2A2D25] focus:border-[#FF5A1F] rounded-lg p-3 text-sm text-[#F2EBDD] focus:outline-none placeholder:text-[#F2EBDD]/30 resize-none"
-            />
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-[#F2EBDD]/40">
-                {currentUser ? `النشر باسم: ${currentUser.displayName}` : 'النشر كزائر'}
-              </span>
+          {currentUser && isFirebaseAuthenticated ? (
+            <div className="bg-[#1E201B] border border-[#2D3027] rounded-xl p-4 space-y-3">
+              <textarea
+                value={commentInput || ''}
+                onChange={(e) => setCommentInput(e.target.value)}
+                placeholder="شارك برأيك أو تقييمك التقني..."
+                rows={3}
+                className="w-full bg-[#161713] border border-[#2A2D25] focus:border-[#FF5A1F] rounded-lg p-3 text-sm text-[#F2EBDD] focus:outline-none placeholder:text-[#F2EBDD]/30 resize-none"
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-[#F2EBDD]/50">
+                  النشر باسم: <strong className="text-[#D7FF38]">{currentUser.displayName}</strong>
+                </span>
+                <button
+                  onClick={() => handlePostComment()}
+                  disabled={isSubmitting || !commentInput.trim()}
+                  className="px-5 py-2 bg-[#FF5A1F] hover:bg-[#FF3300] disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  {isSubmitting ? 'جاري النشر...' : 'إرسال التعليق'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-[#1E201B] border border-[#2D3027] rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-[#F2EBDD]">
+                  المشاركة في التعليقات والإعجاب متاحة للأعضاء المسجلين
+                </p>
+                <p className="text-[11px] text-[#F2EBDD]/55">
+                  سجّل الدخول بحساب Firebase أو Google لإضافة تعليقك وكسب نقاط الخبرة.
+                </p>
+              </div>
               <button
-                onClick={() => handlePostComment()}
-                disabled={isSubmitting || !commentInput.trim()}
-                className="px-5 py-2 bg-[#FF5A1F] hover:bg-[#FF3300] disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                onClick={() => onRequireAuth?.()}
+                className="px-4 py-2 bg-[#FF5A1F] hover:bg-[#FF3300] text-white text-xs font-bold rounded-lg cursor-pointer shrink-0 transition-colors"
               >
-                {isSubmitting ? 'جاري النشر...' : 'إرسال التعليق'}
+                تسجيل الدخول للمشاركة
               </button>
             </div>
-          </div>
+          )}
 
           {/* Comment Thread List */}
           <div className="space-y-4">

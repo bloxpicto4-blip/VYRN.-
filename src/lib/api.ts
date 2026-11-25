@@ -2,12 +2,63 @@ import {
   ContentItem,
   SectionConfig,
   UserProfile,
+  UserRole,
   CommentItem,
   NotificationItem,
   PlatformSettings,
   PlatformAnalytics,
   GameCategory,
+  LocalMigrationSnapshot,
 } from '../types';
+import {
+  auth,
+  isFirebaseAdminUser,
+  uploadImageToFirebaseStorage,
+  signInWithGoogle,
+  signInWithFirebaseEmail,
+  registerWithFirebaseEmail,
+  resetFirebasePassword,
+  updateFirebaseUserPassword,
+} from './firebase';
+import {
+  resolveOrCreateUserProfile,
+  updateMyProfileInFirestore,
+  fetchAllUsersFromFirestore,
+  updateUserRoleInFirestore,
+  getSettingsFromFirestore,
+  updateSettingsInFirestore,
+  getCategoriesFromFirestore,
+  createCategoryInFirestore,
+  updateCategoryInFirestore,
+  deleteCategoryInFirestoreStrict,
+  getSectionsFromFirestore,
+  createSectionInFirestore,
+  updateSectionInFirestore,
+  deleteSectionInFirestoreStrict,
+  reorderSectionsInFirestore,
+  getContentFromFirestore,
+  getContentByIdFromFirestore,
+  createContentInFirestore,
+  updateContentInFirestore,
+  deleteContentFromFirestoreStrict,
+  trackLaunchInFirestore,
+  getCommentsFromFirestore,
+  postCommentInFirestore,
+  deleteCommentInFirestore,
+  reportCommentInFirestore,
+  toggleLikeInFirestore,
+  checkIsLikedInFirestore,
+  getFavoritesFromFirestore,
+  toggleFavoriteInFirestore,
+  getNotificationsFromFirestore,
+  markNotificationReadInFirestore,
+  markAllNotificationsReadInFirestore,
+  getModerationQueueFromFirestore,
+  approveCommentInFirestore,
+  getAnalyticsFromFirestore,
+  migrateLocalSnapshotToFirestore,
+  MigrationReport,
+} from './firestoreService';
 
 const API_BASE = '/api';
 
@@ -17,54 +68,107 @@ function getAuthHeader(): Record<string, string> {
 }
 
 export const api = {
-  // Settings
+  // ======================= SETTINGS (Cloud Firestore) =======================
   async getSettings(): Promise<PlatformSettings> {
-    const res = await fetch(`${API_BASE}/settings`);
-    if (!res.ok) throw new Error('Failed to fetch settings');
-    return res.json();
+    return getSettingsFromFirestore();
   },
 
   async updateSettings(settings: Partial<PlatformSettings>): Promise<PlatformSettings> {
-    const res = await fetch(`${API_BASE}/settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(settings),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to update settings');
-    }
-    return res.json();
+    return updateSettingsInFirestore(settings);
   },
 
-  // Auth
+  // ======================= AUTH (Firebase Authentication + Firestore) =======================
   async login(identifier: string, password: string): Promise<{ token: string; user: UserProfile }> {
+    const cleanId = identifier.trim();
+    if (cleanId.includes('@')) {
+      const fbUser = await signInWithFirebaseEmail(cleanId, password);
+      const user = await resolveOrCreateUserProfile(fbUser);
+      const idToken = await fbUser.getIdToken();
+      let backendToken = '';
+      try {
+        const res = await this.loginWithFirebase(idToken);
+        backendToken = res.token;
+      } catch {
+        backendToken = '';
+      }
+      return { token: backendToken, user };
+    }
+
+    if (!import.meta.env.DEV) {
+      throw new Error('يرجى تسجيل الدخول باستخدام البريد الإلكتروني المسجل في Firebase أو عبر Google.');
+    }
+
+    // Legacy local username login bridge (development only)
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier, password }),
+      body: JSON.stringify({ identifier: cleanId, password }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to login');
+      throw new Error(err.error || 'فشل تسجيل الدخول. استخدم البريد الإلكتروني عبر Firebase أو حساب Google.');
     }
     return res.json();
   },
 
-  async register(data: { username: string; email: string; password: string; displayName?: string }): Promise<{ token: string; user: UserProfile }> {
-    const res = await fetch(`${API_BASE}/auth/register`, {
+  async loginWithGoogleAuth(): Promise<{ token: string; user: UserProfile }> {
+    const fbUser = await signInWithGoogle();
+    const user = await resolveOrCreateUserProfile(fbUser);
+    const idToken = await fbUser.getIdToken();
+    let backendToken = '';
+    try {
+      const res = await this.loginWithFirebase(idToken);
+      backendToken = res.token;
+    } catch {
+      backendToken = '';
+    }
+    return { token: backendToken, user };
+  },
+
+  async loginWithFirebase(idToken: string): Promise<{ token: string; user: UserProfile }> {
+    const res = await fetch(`${API_BASE}/auth/firebase`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify({ idToken }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to register');
+      throw new Error(err.error || 'فشل ربط الجلسة مع الخادم.');
     }
     return res.json();
+  },
+
+  async register(data: {
+    username: string;
+    email: string;
+    password: string;
+    displayName?: string;
+  }): Promise<{ token: string; user: UserProfile }> {
+    const fbUser = await registerWithFirebaseEmail(
+      data.email,
+      data.password,
+      data.displayName || data.username
+    );
+    const user = await resolveOrCreateUserProfile(fbUser);
+    const idToken = await fbUser.getIdToken();
+    let backendToken = '';
+    try {
+      const res = await this.loginWithFirebase(idToken);
+      backendToken = res.token;
+    } catch {
+      backendToken = '';
+    }
+    return { token: backendToken, user };
+  },
+
+  async resetPassword(email: string): Promise<void> {
+    await resetFirebasePassword(email);
   },
 
   async getMe(): Promise<UserProfile> {
+    if (auth.currentUser) {
+      return resolveOrCreateUserProfile(auth.currentUser);
+    }
     const res = await fetch(`${API_BASE}/auth/me`, {
       headers: { ...getAuthHeader() },
     });
@@ -72,7 +176,15 @@ export const api = {
     return res.json();
   },
 
-  async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string; user: UserProfile }> {
+  async changePassword(
+    currentPassword: string,
+    newPassword: string
+  ): Promise<{ message: string; user: UserProfile }> {
+    if (auth.currentUser && auth.currentUser.providerData?.some((p) => p.providerId === 'password')) {
+      await updateFirebaseUserPassword(currentPassword, newPassword);
+      const user = await resolveOrCreateUserProfile(auth.currentUser);
+      return { message: 'تم تحديث كلمة المرور في Firebase Authentication بنجاح.', user };
+    }
     const res = await fetch(`${API_BASE}/auth/change-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
@@ -80,12 +192,15 @@ export const api = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to update password');
+      throw new Error(err.error || 'فشل تحديث كلمة المرور.');
     }
     return res.json();
   },
 
   async updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {
+    if (auth.currentUser) {
+      return updateMyProfileInFirestore(data);
+    }
     const res = await fetch(`${API_BASE}/auth/profile`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
@@ -93,33 +208,20 @@ export const api = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to update profile');
+      throw new Error(err.error || 'فشل تحديث الملف الشخصي.');
     }
     return res.json();
   },
 
   async getUsers(): Promise<UserProfile[]> {
-    const res = await fetch(`${API_BASE}/users`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to fetch users');
-    return res.json();
+    return fetchAllUsersFromFirestore();
   },
 
   async updateUserRole(id: string, role: string, isApproved?: boolean): Promise<UserProfile> {
-    const res = await fetch(`${API_BASE}/users/${id}/role`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ role, isApproved }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to update user role');
-    }
-    return res.json();
+    return updateUserRoleInFirestore(id, role as UserRole, isApproved);
   },
 
-  // Content
+  // ======================= CONTENT (Cloud Firestore) =======================
   async getContent(params?: {
     type?: string;
     category?: string;
@@ -127,301 +229,185 @@ export const api = {
     status?: string;
     sort?: string;
   }): Promise<ContentItem[]> {
-    const query = new URLSearchParams();
-    if (params?.type) query.set('type', params.type);
-    if (params?.category) query.set('category', params.category);
-    if (params?.search) query.set('search', params.search);
-    if (params?.status) query.set('status', params.status);
-    if (params?.sort) query.set('sort', params.sort);
-
-    const res = await fetch(`${API_BASE}/content?${query.toString()}`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to fetch content');
-    return res.json();
+    return getContentFromFirestore(params);
   },
 
   async getContentById(id: string): Promise<ContentItem> {
-    const res = await fetch(`${API_BASE}/content/${id}`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to fetch content item');
-    }
-    return res.json();
+    return getContentByIdFromFirestore(id);
   },
 
   async createContent(data: Partial<ContentItem>): Promise<ContentItem> {
-    const res = await fetch(`${API_BASE}/content`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to create content item');
-    }
-    return res.json();
+    return createContentInFirestore(data);
   },
 
   async updateContent(id: string, data: Partial<ContentItem>): Promise<ContentItem> {
-    const res = await fetch(`${API_BASE}/content/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to update content item');
-    }
-    return res.json();
+    return updateContentInFirestore(id, data);
   },
 
   async deleteContent(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/content/${id}`, {
-      method: 'DELETE',
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to delete content');
+    return deleteContentFromFirestoreStrict(id);
   },
 
   async trackLaunch(id: string): Promise<number> {
-    const res = await fetch(`${API_BASE}/content/${id}/launch`, {
-      method: 'POST',
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) return 0;
-    const data = await res.json();
-    return data.count || 0;
+    return trackLaunchInFirestore(id);
   },
 
-  // Dynamic Sections
+  // ======================= DYNAMIC SECTIONS (Cloud Firestore) =======================
   async getSections(): Promise<SectionConfig[]> {
-    const res = await fetch(`${API_BASE}/sections`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to fetch sections');
-    return res.json();
+    return getSectionsFromFirestore();
   },
 
   async createSection(data: Partial<SectionConfig>): Promise<SectionConfig> {
-    const res = await fetch(`${API_BASE}/sections`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to create section');
-    }
-    return res.json();
+    return createSectionInFirestore(data);
   },
 
   async updateSection(id: string, data: Partial<SectionConfig>): Promise<SectionConfig> {
-    const res = await fetch(`${API_BASE}/sections/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to update section');
-    }
-    return res.json();
+    return updateSectionInFirestore(id, data);
   },
 
   async deleteSection(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/sections/${id}`, {
-      method: 'DELETE',
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to delete section');
+    return deleteSectionInFirestoreStrict(id);
   },
 
   async reorderSections(order: { id: string; sortOrder: number }[]): Promise<SectionConfig[]> {
-    const res = await fetch(`${API_BASE}/sections/reorder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ order }),
-    });
-    if (!res.ok) throw new Error('Failed to reorder sections');
-    return res.json();
+    return reorderSectionsInFirestore(order);
   },
 
-  // Interactions (Comments, Likes, Reports)
+  // ======================= INTERACTIONS (Cloud Firestore) =======================
   async getComments(contentId: string): Promise<CommentItem[]> {
-    const res = await fetch(`${API_BASE}/interactions/comments?contentId=${encodeURIComponent(contentId)}`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to fetch comments');
-    return res.json();
+    return getCommentsFromFirestore(contentId);
   },
 
   async postComment(data: { contentId: string; content: string; parentId?: string }): Promise<CommentItem> {
-    const res = await fetch(`${API_BASE}/interactions/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to post comment');
-    }
-    return res.json();
+    return postCommentInFirestore(data);
   },
 
   async deleteComment(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/interactions/comments/${id}`, {
-      method: 'DELETE',
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to delete comment');
+    return deleteCommentInFirestore(id);
   },
 
   async reportComment(id: string, reason: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/interactions/comments/${id}/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ reason }),
-    });
-    if (!res.ok) throw new Error('Failed to submit report');
+    return reportCommentInFirestore(id, reason);
   },
 
   async toggleLike(contentId: string): Promise<{ liked: boolean; count: number }> {
-    const res = await fetch(`${API_BASE}/interactions/likes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ contentId }),
-    });
-    if (!res.ok) throw new Error('Failed to toggle like');
-    return res.json();
+    return toggleLikeInFirestore(contentId);
   },
 
-  // Favorites
+  async checkIsLiked(contentId: string): Promise<boolean> {
+    return checkIsLikedInFirestore(contentId);
+  },
+
+  // ======================= FAVORITES (Cloud Firestore) =======================
   async getFavorites(): Promise<ContentItem[]> {
-    const res = await fetch(`${API_BASE}/favorites`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) return [];
-    return res.json();
+    return getFavoritesFromFirestore();
   },
 
   async toggleFavorite(contentId: string): Promise<{ isFavorite: boolean }> {
-    const res = await fetch(`${API_BASE}/favorites/toggle`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ contentId }),
-    });
-    if (!res.ok) throw new Error('Sign in to save favorites');
-    return res.json();
+    return toggleFavoriteInFirestore(contentId);
   },
 
-  // Notifications
+  // ======================= NOTIFICATIONS (Cloud Firestore) =======================
   async getNotifications(): Promise<NotificationItem[]> {
-    const res = await fetch(`${API_BASE}/notifications`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) return [];
-    return res.json();
+    return getNotificationsFromFirestore();
   },
 
   async markNotificationRead(id: string): Promise<void> {
-    await fetch(`${API_BASE}/notifications/${id}/read`, {
-      method: 'PUT',
-      headers: { ...getAuthHeader() },
-    });
+    return markNotificationReadInFirestore(id);
   },
 
   async markAllNotificationsRead(): Promise<void> {
-    await fetch(`${API_BASE}/notifications/mark-all-read`, {
-      method: 'PUT',
-      headers: { ...getAuthHeader() },
-    });
+    return markAllNotificationsReadInFirestore();
   },
 
-  // Moderation & Analytics
+  // ======================= MODERATION & ANALYTICS (Cloud Firestore) =======================
   async getModerationQueue(): Promise<CommentItem[]> {
-    const res = await fetch(`${API_BASE}/moderation/comments`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to fetch moderation queue');
-    return res.json();
+    return getModerationQueueFromFirestore();
   },
 
   async approveComment(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/moderation/comments/${id}/approve`, {
-      method: 'PUT',
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to approve comment');
+    return approveCommentInFirestore(id);
   },
 
   async getAnalytics(): Promise<PlatformAnalytics> {
-    const res = await fetch(`${API_BASE}/analytics`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) throw new Error('Failed to fetch analytics');
-    return res.json();
+    return getAnalyticsFromFirestore();
   },
 
-  // Categories
+  // ======================= CATEGORIES (Cloud Firestore) =======================
   async getCategories(type?: string): Promise<GameCategory[]> {
-    const q = type ? `?type=${type}` : '';
-    const res = await fetch(`${API_BASE}/categories${q}`, {
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) return [];
-    return res.json();
+    return getCategoriesFromFirestore(type);
   },
 
-  async createCategory(data: { name: string; type?: string; description?: string }): Promise<GameCategory> {
-    const res = await fetch(`${API_BASE}/categories`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'فشل إنشاء التصنيف');
-    }
-    return res.json();
+  async createCategory(data: {
+    name: string;
+    type?: 'game' | 'app' | 'project' | 'book' | 'podcast';
+    description?: string;
+  }): Promise<GameCategory> {
+    return createCategoryInFirestore(data);
   },
 
   async updateCategory(id: string, data: { name?: string; description?: string }): Promise<GameCategory> {
-    const res = await fetch(`${API_BASE}/categories/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'فشل تعديل التصنيف');
-    }
-    return res.json();
+    return updateCategoryInFirestore(id, data);
   },
 
   async deleteCategory(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/categories/${id}`, {
-      method: 'DELETE',
-      headers: { ...getAuthHeader() },
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'فشل حذف التصنيف');
-    }
+    return deleteCategoryInFirestoreStrict(id);
   },
 
-  async uploadFile(dataUrl: string, filename?: string): Promise<{ url: string }> {
+  // ======================= FILE UPLOAD & SAFE LOCAL MIGRATION =======================
+  async uploadFile(
+    dataUrlOrFile: string | File,
+    filename?: string,
+    folder: 'covers' | 'gallery' = 'covers'
+  ): Promise<{ url: string }> {
+    if (isFirebaseAdminUser()) {
+      const uploaded = await uploadImageToFirebaseStorage(dataUrlOrFile, folder, filename);
+      return { url: uploaded.url };
+    }
+
+    if (!import.meta.env.DEV) {
+      throw new Error('يجب تسجيل الدخول بحساب الإدارة المعتمد في Google / Firebase لرفع الصور إلى Firebase Storage.');
+    }
+
+    if (typeof dataUrlOrFile !== 'string') {
+      throw new Error('في وضع التطوير المحلي يلزم تمرير Data URL.');
+    }
+
+    const headers = getAuthHeader();
     const res = await fetch(`${API_BASE}/upload`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ dataUrl, filename }),
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ dataUrl: dataUrlOrFile, filename }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'فشل رفع الملف');
     }
     return res.json();
+  },
+
+  async getLocalMigrationSnapshot(): Promise<LocalMigrationSnapshot> {
+    let headers = getAuthHeader();
+    if (!headers.Authorization && auth.currentUser) {
+      const idToken = await auth.currentUser.getIdToken();
+      const session = await this.loginWithFirebase(idToken);
+      if (session.token) {
+        localStorage.setItem('vyrn_token', session.token);
+        headers = { Authorization: `Bearer ${session.token}` };
+      }
+    }
+    const res = await fetch(`${API_BASE}/migration/export`, {
+      headers,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'تعذر قراءة بيانات النسخة المحلية للترحيل.');
+    }
+    return res.json();
+  },
+
+  async migrateLocalToFirestore(): Promise<MigrationReport> {
+    const snapshot = await this.getLocalMigrationSnapshot();
+    return migrateLocalSnapshotToFirestore(snapshot);
   },
 };

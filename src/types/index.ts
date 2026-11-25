@@ -182,7 +182,98 @@ export interface GameCategory {
   id: string;
   name: string;
   slug: string;
+  type?: ContentType;
   description?: string;
   itemCount?: number;
 }
 
+export interface LikeItem {
+  id: string;
+  contentId: string;
+  userId: string;
+  createdAt: string;
+}
+
+export interface FavoriteItem {
+  id: string;
+  userId: string;
+  contentId: string;
+  createdAt: string;
+}
+
+export interface AchievementDefinition {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  pointsReward: number;
+  category: 'play' | 'social' | 'multiplayer' | 'collector';
+  requirementType: 'games_played' | 'wins_count' | 'comments_count' | 'favorites_count' | 'points_total' | 'rooms_joined';
+  requirementTarget: number;
+  isActive: boolean;
+}
+
+export interface UserStats {
+  userId: string;
+  displayName: string;
+  avatarUrl?: string;
+  points: number;
+  xp: number;
+  level: number;
+  gamesPlayed: number;
+  winsCount: number;
+  unlockedAchievements: string[];
+  isOnline: boolean;
+  currentRoomId?: string;
+  lastSeenAt: string;
+  updatedAt: string;
+}
+
+export type RoomStatus = 'waiting' | 'playing' | 'finished';
+
+export interface GameRoom {
+  id: string;
+  code: string;
+  title: string;
+  gameId?: string;
+  gameTitle: string;
+  hostId: string;
+  hostName: string;
+  status: RoomStatus;
+  maxPlayers: number;
+  isPrivate: boolean;
+  playerCount: number;
+  winnerId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoomPlayer {
+  id: string;
+  roomId: string;
+  displayName: string;
+  avatarUrl?: string;
+  isReady: boolean;
+  score: number;
+  joinedAt: string;
+  lastPingAt: string;
+}
+
+export interface RoomMessage {
+  id: string;
+  roomId: string;
+  userId: string;
+  displayName: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface LocalMigrationSnapshot {
+  settings: PlatformSettings;
+  users: UserProfile[];
+  items: ContentItem[];
+  sections: SectionConfig[];
+  categories: GameCategory[];
+  comments: CommentItem[];
+  notifications: NotificationItem[];
+}

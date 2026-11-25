@@ -127,6 +127,22 @@ export const Footer: React.FC<FooterProps> = ({
                   الخزينة والمفضلة الشخصية
                 </button>
               </li>
+              <li>
+                <button
+                  onClick={() => onNavigate('rooms')}
+                  className="hover:text-[#D7FF38] transition-colors cursor-pointer"
+                >
+                  غرف اللعب الجماعي المتزامنة
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => onNavigate('achievements')}
+                  className="hover:text-[#D7FF38] transition-colors cursor-pointer"
+                >
+                  النقاط والإنجازات ولوحة المتصدرين
+                </button>
+              </li>
             </ul>
           </div>
 
